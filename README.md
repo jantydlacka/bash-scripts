@@ -13,9 +13,12 @@ pak postupně uvolní cache a dočasné soubory a na konci vypíše, kolik se uv
 - **APT** — `apt-get autoclean` + `autoremove --purge` (zastaralé balíčky, osiřelé
   závislosti, staré kernely)
 - **Cache miniatur** — `~/.cache/thumbnails`
-- **Dočasné soubory** — soubory ve `/tmp` starší 3 dny (podle `mtime`)
+- **Dočasné soubory** — soubory ve `/tmp` nezměněné ani nečtené 3 dny (`mtime` i `atime`);
+  vynechá skryté položky v kořeni `/tmp` (zámky X serveru apod.), privátní `/tmp`
+  služeb a snapů a nepřechází na jiné souborové systémy
 - **systemd journal** — `journalctl --vacuum-time=7d` (ponechá posledních 7 dní)
-- **Docker** — `docker system prune` (nepoužívané images, kontejnery, build cache)
+- **Docker** — `docker system prune` (zastavené kontejnery, nepoužívané sítě, dangling
+  images a build cache; otagované nepoužívané images **nemaže**)
 - **Snap** — odstranění starých (disabled) revizí
 - **Souhrn** — kolik místa se uvolnilo po jednotlivých sekcích i celkem
 
@@ -33,12 +36,16 @@ pak postupně uvolní cache a dočasné soubory a na konci vypíše, kolik se uv
 
 | Přepínač | Popis |
 |---|---|
-| `--dry-run`, `-n` | Jen ukáže, co by se uklidilo, nic nemaže |
+| `--dry-run`, `-n` | Jen ukáže, co by se uklidilo (balíky z `autoremove`, počet a velikost souborů v `/tmp`, velikost journalu, staré revize snapů), nic nemaže |
 | `--docker-volumes` | Uvolní i nepoužívané Docker volumes — **⚠️ může smazat data** (DB, aplikace), proto je mimo výchozí úklid |
 | `--help`, `-h` | Nápověda |
 
 ### Poznámky
 
 - Vyžaduje `sudo` (úklid `/var`, `/tmp`, journalu); o heslo si řekne jednou na začátku.
-- Docker a Snap sekce se spustí jen pokud jsou nástroje nainstalované.
+  `--dry-run` heslo nevyžaduje – bez platného `sudo` jen počítá s tím, co je čitelné.
+- Docker a Snap sekce se spustí jen pokud jsou nástroje nainstalované. Bez členství
+  ve skupině `docker` se Docker volá přes `sudo`.
+- Uvolněné místo se u každé sekce měří na souborovém systému, kde leží její data
+  (u journalu jako úbytek jeho velikosti); celkový součet na konci je měřený na `/`.
 - Doporučení: nejdřív spustit s `--dry-run`.
