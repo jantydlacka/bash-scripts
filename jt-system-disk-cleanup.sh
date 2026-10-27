@@ -24,10 +24,11 @@ for arg in "$@"; do
     esac
 done
 
-# Volné místo na souborovém systému cesty; neexistující cesta se měří na /
+# Volné místo na souborovém systému cesty; neexistující cesta se měří
+# na nejbližším existujícím nadřazeném adresáři
 avail_kb() {
     local path="${1:-/}"
-    [[ -e "$path" ]] || path=/
+    while [[ ! -e "$path" ]]; do path=$(dirname "$path"); done
     df --output=avail "$path" | tail -n1 | tr -d ' '
 }
 # Velikost journalu se záporným znaménkem, aby šla měřit jako "volné místo"
@@ -107,7 +108,7 @@ else
 fi
 
 # Cache miniatur
-run_section "Cache miniatur (~/.cache/thumbnails)" avail_kb "$HOME" \
+run_section "Cache miniatur (~/.cache/thumbnails)" avail_kb "$HOME/.cache/thumbnails" \
     bash -c "rm -rf ~/.cache/thumbnails/* 2>/dev/null || true"
 
 # Dočasné soubory nepoužité 3 dny (mtime i atime, v minutách – "-mtime +3" by
@@ -142,18 +143,29 @@ if command -v journalctl >/dev/null 2>&1; then
 fi
 
 # Docker — bývá to klidně desítky GB
-docker_ok() { timeout 10 "$@" version >/dev/null 2>&1; }
 docker_section() {
     echo "------------------------------------------------"
     echo "### Docker ###"
-    # Bez členství ve skupině docker je potřeba sudo; timeout kvůli zaseklému démonu
-    local docker_cmd=(docker)
-    if ! docker_ok docker; then
-        docker_cmd=(sudo docker)
+    # sudo jen při odmítnutém přístupu k socketu, a to na tentýž endpoint (-H):
+    # sudo zahodí DOCKER_HOST/kontext a mířil by na jiného démona.
+    # Timeout kvůli zaseklému démonu.
+    local docker_cmd=(docker) probe rc=0 endpoint
+    probe=$(timeout 10 docker version 2>&1 >/dev/null) || rc=$?
+    if (( rc == 124 )); then
+        echo "   ⚠️  docker neodpovídá do 10 s – sekce přeskočena"
+        return 0
+    elif (( rc != 0 )); then
+        endpoint=$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
+        if ! grep -qi 'permission denied' <<< "$probe" || [[ -z "$endpoint" ]]; then
+            echo "   ⚠️  docker není dostupný – sekce přeskočena:"
+            sed 's/^/   /' <<< "$probe"
+            return 0
+        fi
+        docker_cmd=(sudo docker -H "$endpoint")
         if [[ $DRY_RUN -eq 1 ]]; then
-            echo "   (docker bez sudo nedostupný, ostrý běh použije sudo – v dry-run se o heslo neříká)"
-        elif ! docker_ok sudo docker; then
-            echo "   ⚠️  docker neodpovídá do 10 s (neběží démon?) – sekce přeskočena"
+            echo "   (bez sudo odmítnut přístup k ${endpoint}, ostrý běh použije sudo – v dry-run se o heslo neříká)"
+        elif ! timeout 10 "${docker_cmd[@]}" version >/dev/null 2>&1; then
+            echo "   ⚠️  ${docker_cmd[*]} neodpovídá do 10 s – sekce přeskočena"
             return 0
         fi
     fi
